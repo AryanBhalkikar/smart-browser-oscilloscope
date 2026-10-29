@@ -1,14 +1,5 @@
-import { BrowserRouter, Routes, Route } from "react-router-dom";
-import Oscilloscope from "./pages/Oscilloscope";
+import Oscilloscope from './pages/Oscilloscope';
 
-function App() {
-  return (
-    <BrowserRouter>
-      <Routes>
-        <Route path="/" element={<Oscilloscope />} />
-      </Routes>
-    </BrowserRouter>
-  );
+export default function App() {
+    return <Oscilloscope />;
 }
-
-export default App

@@ -1,21 +1,44 @@
 import dgram from 'node:dgram';
+import { WebSocketServer, WebSocket } from 'ws';
 
-const PORT = 4000;
-const server = dgram.createSocket('udp4');
+const UDP_PORT = 4000;
+const WS_PORT = 8080;
 
-server.on('error', (err) => {
-    console.error(`server error:\n${err.stack}`);
-    server.close();
+const wss = new WebSocketServer({ port: WS_PORT });
+
+wss.on("connection", (ws) => {
+    console.log("Frontend client connected to WebSocket");
+
+    ws.on("close", () => {
+        console.log("Frontend client disconnected");
+    });
 });
 
-server.on('message', (msg, rinfo) => {
+console.log(`WebSocket server running on ws://localhost:${WS_PORT}`);
+
+const udpServer = dgram.createSocket('udp4');
+
+udpServer.on('error', (err) => {
+    console.error(`UDP server error:\n${err.stack}`);
+    udpServer.close();
+});
+
+udpServer.on('message', (msg) => {
     const floatVal = msg.readFloatLE(0);
     console.log(`Server received: ${floatVal}`);
+
+    for (const client of wss.clients) {
+        if (client.readyState === WebSocket.OPEN) {
+            client.send(msg);
+        }
+    }
 });
 
-server.on('listening', () => {
-    const address = server.address();
-    console.log(`server listening ${address.address}:${address.port}`);
+udpServer.on('listening', () => {
+    const address = udpServer.address();
+    console.log(`UDP server listening ${address.address}:${address.port}`);
 });
 
-server.bind(PORT);
+udpServer.bind(UDP_PORT, '0.0.0.0', () => {
+    console.log(`Server listening on all interfaces at port ${UDP_PORT}`);
+});
