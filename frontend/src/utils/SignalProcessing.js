@@ -49,19 +49,26 @@ export function calculateMeasurements(dataSlice, sampleRate) {
     if (vpp > 0.1) {
         const hist = vpp * 0.05;
         const crossings = [];
+        
+        // Track strict rising-edge crossings (going from below mean - hist to above mean + hist)
         let state = dataSlice[0] > mean;
 
         for (let i = 1; i < N; i++) {
-            if (state && dataSlice[i] < mean - hist) {
-                state = false;
-            } else if (!state && dataSlice[i] > mean + hist) {
+            if (!state && dataSlice[i] >= mean + hist) {
                 state = true;
-                crossings.push(i);
+                crossings.push(i); // Record rising edge crossing
+            } else if (state && dataSlice[i] <= mean - hist) {
+                state = false;
             }
         }
 
+        // If we have at least 2 rising edges, calculate precise frequency
         if (crossings.length >= 2) {
-            const avgSamplesPerCycle = (crossings[crossings.length - 1] - crossings[0]) / (crossings.length - 1);
+            // Distance between the first and last rising edge divided by the number of complete cycles
+            const totalCycles = crossings.length - 1;
+            const totalSamplesInCycles = crossings[crossings.length - 1] - crossings[0];
+            const avgSamplesPerCycle = totalSamplesInCycles / totalCycles;
+            
             const hz = sampleRate / avgSamplesPerCycle;
             freqStr = hz > 1e6 ? (hz / 1e6).toFixed(2) + ' M' : 
                       hz > 1e3 ? (hz / 1e3).toFixed(2) + ' k' : 

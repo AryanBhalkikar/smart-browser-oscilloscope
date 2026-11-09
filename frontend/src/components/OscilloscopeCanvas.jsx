@@ -81,11 +81,20 @@ export default function OscilloscopeCanvas({
             if (displayData && displayData.length > 0) {
                 drawWaveform(ctx, displayData, w, h, cfg);
                 
-                // Throttle React measurement updates to 4 times a second to prevent UI lag
-                if (time - lastMeasTimeRef.current > 250) {
-                    onMeasurementsUpdate(calculateMeasurements(displayData, cfg.sampleRate));
-                    lastMeasTimeRef.current = time;
+            }
+
+            // Measure over a longer window than the visible trace. This keeps
+            // low-frequency measurements stable when the time/div is zoomed in.
+            if (time - lastMeasTimeRef.current > 250) {
+                const measurementSamples = Math.min(
+                    dataBuffer.current.buffer.length,
+                    Math.max(visibleSamples, Math.ceil(cfg.sampleRate * 2))
+                );
+                const measurementData = dataBuffer.current.extractLatest(measurementSamples);
+                if (measurementData.length > 0) {
+                    onMeasurementsUpdate(calculateMeasurements(measurementData, cfg.sampleRate));
                 }
+                lastMeasTimeRef.current = time;
             }
 
             drawOverlays(ctx, w, h, cfg);

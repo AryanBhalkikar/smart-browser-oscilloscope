@@ -9,6 +9,7 @@ const WS_URL = 'ws://localhost:8080';
 
 export default function Oscilloscope() {
     const dataBuffer = useRef(new DataBuffer());
+    const sampleRateRef = useRef(SAMPLE_RATE_HZ);
     // Core App State
     const [wsStatus, setWsStatus] = useState('disconnected');
     const [measurements, setMeasurements] = useState({ vmax: '--', vmin: '--', vpp: '--', vmean: '--', vrms: '--', freq: '--' });
@@ -19,7 +20,7 @@ export default function Oscilloscope() {
         demoMode: false,
         voltsPerDiv: 1,
         vOffset: 0,
-        timePerDiv: 0.001,
+        timePerDiv: 0.01,
         trigMode: 'AUTO',
         trigEdge: 'RISING',
         trigLevel: 0,
@@ -59,14 +60,59 @@ export default function Oscilloscope() {
                 ws.onopen = () => setWsStatus('connected');
                 ws.onclose = () => { setWsStatus('disconnected'); setTimeout(connect, 3000); };
                 ws.onmessage = (e) => {
+                    if (typeof e.data === 'string') {
+                        let message;
+                        try {
+                            message = JSON.parse(e.data);
+                        } catch (err) {
+                            console.error(`Invalid JSON sample message: ${err.message}`);
+                            return;
+                        }
+
+                        if (
+                            !Number.isFinite(message?.sampleRate) ||
+                            message.sampleRate <= 0 ||
+                            !Array.isArray(message.samples) ||
+                            message.samples.length === 0 ||
+                            !message.samples.every(Number.isFinite)
+                        ) {
+                            console.error('Expected JSON with a positive finite sampleRate and a non-empty array of finite samples.');
+                            return;
+                        }
+
+                        const samples = Float32Array.from(message.samples);
+                        if (!samples.every(Number.isFinite)) {
+                            console.error('Sample values must fit in the Float32 range.');
+                            return;
+                        }
+
+                        const sampleRateTolerance = Math.max(0.01, sampleRateRef.current * 1e-6);
+                        if (Math.abs(message.sampleRate - sampleRateRef.current) > sampleRateTolerance) {
+                            sampleRateRef.current = message.sampleRate;
+                            dataBuffer.current.clear();
+                            setMeasurements({ vmax: '--', vmin: '--', vpp: '--', vmean: '--', vrms: '--', freq: '--' });
+                            setSettings(prev => ({ ...prev, sampleRate: message.sampleRate }));
+                        }
+
+                        dataBuffer.current.push(samples);
+                        return;
+                    }
+
                     if (!(e.data instanceof ArrayBuffer)) {
-                        console.error('Expected binary Float32 sample data from the WebSocket.');
+                        console.error('Expected JSON samples or binary Float32 sample data from the WebSocket.');
                         return;
                     }
 
                     if (e.data.byteLength % Float32Array.BYTES_PER_ELEMENT !== 0) {
                         console.error(`Received ${e.data.byteLength} bytes; Float32 sample data must be a multiple of 4 bytes.`);
                         return;
+                    }
+
+                    if (sampleRateRef.current !== SAMPLE_RATE_HZ) {
+                        sampleRateRef.current = SAMPLE_RATE_HZ;
+                        dataBuffer.current.clear();
+                        setMeasurements({ vmax: '--', vmin: '--', vpp: '--', vmean: '--', vrms: '--', freq: '--' });
+                        setSettings(prev => ({ ...prev, sampleRate: SAMPLE_RATE_HZ }));
                     }
 
                     const sampleCount = e.data.byteLength / Float32Array.BYTES_PER_ELEMENT;
@@ -103,7 +149,7 @@ export default function Oscilloscope() {
                     <span className={`indicator ${settings.acqState === 'STOP' ? 'stopped' : 'running'}`}>
                         ACQ: {settings.acqState === 'SINGLE_WAIT' ? 'Wait Trigger' : settings.acqState}
                     </span>
-                    <span>{(SAMPLE_RATE_HZ / 1000).toFixed(1)} kS/s</span>
+                    <span>{(settings.sampleRate / 1000).toFixed(1)} kS/s</span>
                 </div>
             </header>
 
