@@ -1,5 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { DataBuffer } from '../utils/DataBuffer';
+import { PairedDataBuffer } from '../utils/PairedDataBuffer';
+import { normalizeSampleMessage } from '../utils/SignalProcessing';
 import ControlPanel from '../components/ControlPanel';
 import OscilloscopeCanvas from '../components/OscilloscopeCanvas';
 import '../App.css';
@@ -9,17 +11,25 @@ const WS_URL = 'ws://localhost:8080';
 
 export default function Oscilloscope() {
     const dataBuffer = useRef(new DataBuffer());
+    const xyDataBuffer = useRef(new PairedDataBuffer());
     const sampleRateRef = useRef(SAMPLE_RATE_HZ);
+    const streamFormatRef = useRef(null);
     // Core App State
     const [wsStatus, setWsStatus] = useState('disconnected');
+    const [hasPairedInput, setHasPairedInput] = useState(false);
     const [measurements, setMeasurements] = useState({ vmax: '--', vmin: '--', vpp: '--', vmean: '--', vrms: '--', freq: '--' });
 
     // Oscilloscope Settings State
     const [settings, setSettings] = useState({
         acqState: 'RUN',
         demoMode: false,
+        displayMode: 'TIME',
         voltsPerDiv: 1,
         vOffset: 0,
+        xyXVoltsPerDiv: 1,
+        xyYVoltsPerDiv: 1,
+        xyXOffset: 0,
+        xyYOffset: 0,
         timePerDiv: 0.01,
         trigMode: 'AUTO',
         trigEdge: 'RISING',
@@ -40,17 +50,46 @@ export default function Oscilloscope() {
         let ws;
         let demoInterval;
 
+        const resetBuffers = () => {
+            dataBuffer.current.clear();
+            xyDataBuffer.current.clear();
+            setMeasurements({ vmax: '--', vmin: '--', vpp: '--', vmean: '--', vrms: '--', freq: '--' });
+        };
+
+        const updateSampleRate = (sampleRate) => {
+            const tolerance = Math.max(0.01, sampleRateRef.current * 1e-6);
+            if (Math.abs(sampleRate - sampleRateRef.current) <= tolerance) return;
+
+            sampleRateRef.current = sampleRate;
+            resetBuffers();
+            setSettings(prev => ({ ...prev, sampleRate }));
+        };
+
+        const selectStreamFormat = (format) => {
+            if (streamFormatRef.current === format) return;
+            streamFormatRef.current = format;
+            setHasPairedInput(format === 'xy');
+            resetBuffers();
+            if (format !== 'xy') {
+                setSettings(prev => prev.displayMode === 'XY' ? { ...prev, displayMode: 'TIME' } : prev);
+            }
+        };
+
         if (settings.demoMode) {
-            let phase = 0;
+            selectStreamFormat('xy');
+            let sampleIndex = 0;
             demoInterval = setInterval(() => {
                 if (settings.acqState === 'STOP' || settings.acqState === 'SINGLE_DONE') return;
-                const chunk = new Float32Array(1000);
+                const xSamples = new Float32Array(1000);
+                const ySamples = new Float32Array(1000);
                 for (let i = 0; i < 1000; i++) {
-                    const t = phase + i / SAMPLE_RATE_HZ;
-                    chunk[i] = 1.5 * Math.sin(2 * Math.PI * 1000 * t) + 0.5 * Math.sin(2 * Math.PI * 2500 * t) + (Math.random() * 0.1 - 0.05);
+                    const t = (sampleIndex + i) / SAMPLE_RATE_HZ;
+                    xSamples[i] = 1.5 * Math.sin(2 * Math.PI * 1000 * t);
+                    ySamples[i] = 1.5 * Math.sin(2 * Math.PI * 1000 * t + Math.PI / 3);
                 }
-                phase += 1000 / SAMPLE_RATE_HZ;
-                dataBuffer.current.push(chunk);
+                sampleIndex += xSamples.length;
+                dataBuffer.current.push(xSamples);
+                xyDataBuffer.current.push(xSamples, ySamples);
             }, (1000 / SAMPLE_RATE_HZ) * 1000);
         } else {
             const connect = () => {
@@ -69,32 +108,20 @@ export default function Oscilloscope() {
                             return;
                         }
 
-                        if (
-                            !Number.isFinite(message?.sampleRate) ||
-                            message.sampleRate <= 0 ||
-                            !Array.isArray(message.samples) ||
-                            message.samples.length === 0 ||
-                            !message.samples.every(Number.isFinite)
-                        ) {
-                            console.error('Expected JSON with a positive finite sampleRate and a non-empty array of finite samples.');
+                        const normalized = normalizeSampleMessage(message);
+                        if (normalized.error) {
+                            console.error(`Invalid sample message: ${normalized.error}`);
                             return;
                         }
 
-                        const samples = Float32Array.from(message.samples);
-                        if (!samples.every(Number.isFinite)) {
-                            console.error('Sample values must fit in the Float32 range.');
-                            return;
+                        updateSampleRate(normalized.sampleRate);
+                        selectStreamFormat(normalized.mode);
+                        if (normalized.mode === 'xy') {
+                            dataBuffer.current.push(normalized.xSamples);
+                            xyDataBuffer.current.push(normalized.xSamples, normalized.ySamples);
+                        } else {
+                            dataBuffer.current.push(normalized.samples);
                         }
-
-                        const sampleRateTolerance = Math.max(0.01, sampleRateRef.current * 1e-6);
-                        if (Math.abs(message.sampleRate - sampleRateRef.current) > sampleRateTolerance) {
-                            sampleRateRef.current = message.sampleRate;
-                            dataBuffer.current.clear();
-                            setMeasurements({ vmax: '--', vmin: '--', vpp: '--', vmean: '--', vrms: '--', freq: '--' });
-                            setSettings(prev => ({ ...prev, sampleRate: message.sampleRate }));
-                        }
-
-                        dataBuffer.current.push(samples);
                         return;
                     }
 
@@ -108,12 +135,8 @@ export default function Oscilloscope() {
                         return;
                     }
 
-                    if (sampleRateRef.current !== SAMPLE_RATE_HZ) {
-                        sampleRateRef.current = SAMPLE_RATE_HZ;
-                        dataBuffer.current.clear();
-                        setMeasurements({ vmax: '--', vmin: '--', vpp: '--', vmean: '--', vrms: '--', freq: '--' });
-                        setSettings(prev => ({ ...prev, sampleRate: SAMPLE_RATE_HZ }));
-                    }
+                    updateSampleRate(SAMPLE_RATE_HZ);
+                    selectStreamFormat('single');
 
                     const sampleCount = e.data.byteLength / Float32Array.BYTES_PER_ELEMENT;
                     const view = new DataView(e.data);
@@ -135,10 +158,14 @@ export default function Oscilloscope() {
 
     const handleClear = () => {
         dataBuffer.current.clear();
+        xyDataBuffer.current.clear();
         setMeasurements({ vmax: '--', vmin: '--', vpp: '--', vmean: '--', vrms: '--', freq: '--' });
     };
 
     const displayWsStatus = settings.demoMode ? 'demo' : wsStatus;
+    const measurementPrefix = settings.displayMode === 'XY'
+        ? 'X '
+        : hasPairedInput ? 'CH1 ' : '';
 
     return (
         <div className="dso-container">
@@ -158,20 +185,22 @@ export default function Oscilloscope() {
                     <OscilloscopeCanvas
                         settings={settings}
                         dataBuffer={dataBuffer}
+                        xyDataBuffer={xyDataBuffer}
                         onMeasurementsUpdate={setMeasurements}
                     />
                     <div className="measurements-panel">
-                        <div className="meas-item">Vmax: <span>{measurements.vmax}</span> V</div>
-                        <div className="meas-item">Vmin: <span>{measurements.vmin}</span> V</div>
-                        <div className="meas-item">Vpp: <span>{measurements.vpp}</span> V</div>
-                        <div className="meas-item">Vmean: <span>{measurements.vmean}</span> V</div>
-                        <div className="meas-item">Vrms: <span>{measurements.vrms}</span> V</div>
-                        <div className="meas-item">Freq: <span>{measurements.freq}</span> Hz</div>
+                        <div className="meas-item">{measurementPrefix}Vmax: <span>{measurements.vmax}</span> V</div>
+                        <div className="meas-item">{measurementPrefix}Vmin: <span>{measurements.vmin}</span> V</div>
+                        <div className="meas-item">{measurementPrefix}Vpp: <span>{measurements.vpp}</span> V</div>
+                        <div className="meas-item">{measurementPrefix}Vmean: <span>{measurements.vmean}</span> V</div>
+                        <div className="meas-item">{measurementPrefix}Vrms: <span>{measurements.vrms}</span> V</div>
+                        <div className="meas-item">{measurementPrefix}Freq: <span>{measurements.freq}</span> Hz</div>
                     </div>
                 </div>
 
                 <ControlPanel
                     settings={settings}
+                    hasPairedInput={hasPairedInput}
                     updateSetting={updateSetting}
                     actions={{ onClear: handleClear }}
                 />

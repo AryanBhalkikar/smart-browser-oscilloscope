@@ -32,6 +32,7 @@ canvas { background-color: #000; border: 2px solid var(--border-color); border-r
 .button-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
 button { background: var(--btn-bg); color: var(--text-main); border: 1px solid var(--border-color); padding: 8px; border-radius: 4px; cursor: pointer; font-weight: bold; transition: background 0.2s; }
 button:hover { background: var(--btn-hover); }
+button:disabled { opacity: 0.45; cursor: not-allowed; }
 button.active { background: var(--btn-active); color: var(--accent-green); border-color: var(--accent-green); }
 .control-row { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; }
 .control-row label { font-size: 0.9rem; flex: 1; }

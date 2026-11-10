@@ -1,8 +1,8 @@
 classdef TcpJsonStreamer < matlab.System
-    % Send sampled voltage batches to the repository's Ethernet TCP bridge.
+    % Send synchronized X/Y voltage batches to the Ethernet TCP bridge.
     %
-    % Connect a discrete signal to this block. Its sample rate is measured
-    % from the simulation timestamps of the samples in each outgoing batch.
+    % Connect a discrete two-element [X, Y] signal to this block. Its sample
+    % rate is measured from simulation timestamps for each outgoing batch.
 
     properties (Nontunable)
         ServerAddress = "192.168.1.20"
@@ -25,7 +25,7 @@ classdef TcpJsonStreamer < matlab.System
     methods (Access = protected)
         function setupImpl(obj)
             obj.Client = tcpclient(obj.ServerAddress, obj.Port);
-            obj.Samples = zeros(1, obj.SamplesPerMessage);
+            obj.Samples = zeros(obj.SamplesPerMessage, 2);
             obj.Index = 0;
             obj.SampleRate = 0;
             obj.FirstSampleTime = 0;
@@ -34,7 +34,7 @@ classdef TcpJsonStreamer < matlab.System
             obj.BatchWallTimer = tic;
         end
 
-        function stepImpl(obj, voltage)
+        function stepImpl(obj, voltagePair)
             if ~obj.SampleTimeValidated
                 sampleTimeInfo = getSampleTime(obj);
                 if ~strcmpi(sampleTimeInfo.Type, 'Discrete') || ...
@@ -56,8 +56,14 @@ classdef TcpJsonStreamer < matlab.System
                     'Simulation sample times must increase for every input sample.');
             end
 
+            if numel(voltagePair) ~= 2
+                error('TcpJsonStreamer:TwoChannelsRequired', ...
+                    'Input must be a two-element vector ordered as [X voltage, Y voltage].');
+            end
+
             obj.Index = obj.Index + 1;
-            obj.Samples(obj.Index) = double(voltage);
+            pair = double(voltagePair(:));
+            obj.Samples(obj.Index, :) = pair.';
             obj.LastSampleTime = currentTime;
 
             if obj.Index == obj.SamplesPerMessage
@@ -74,7 +80,8 @@ classdef TcpJsonStreamer < matlab.System
 
                 payload = struct( ...
                     'sampleRate', obj.SampleRate, ...
-                    'samples', obj.Samples);
+                    'xSamples', obj.Samples(:, 1).', ...
+                    'ySamples', obj.Samples(:, 2).');
                 line = [jsonencode(payload), newline];
                 write(obj.Client, uint8(line));
 

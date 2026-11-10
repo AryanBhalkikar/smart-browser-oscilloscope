@@ -22,8 +22,8 @@ wss.on('error', (err) => {
     console.error(`WebSocket server error: ${err.message}`);
 });
 
-function broadcast(sampleRate, samples) {
-    const message = JSON.stringify({ sampleRate, samples });
+function broadcast(message) {
+    const serialized = JSON.stringify(message);
 
     for (const client of wss.clients) {
         if (client.readyState !== WebSocket.OPEN) continue;
@@ -34,7 +34,7 @@ function broadcast(sampleRate, samples) {
             continue;
         }
 
-        client.send(message, (err) => {
+        client.send(serialized, (err) => {
             if (err) console.error(`WebSocket send error: ${err.message}`);
         });
     }
@@ -52,21 +52,30 @@ function handleLine(line, socket) {
         return false;
     }
 
-    const { sampleRate, samples } = message ?? {};
-    if (
-        !Number.isFinite(sampleRate) ||
-        sampleRate <= 0 ||
-        !Array.isArray(samples) ||
-        samples.length === 0 ||
-        samples.length > MAX_SAMPLES_PER_MESSAGE ||
-        !samples.every(Number.isFinite)
-    ) {
-        console.error('TCP message must contain a positive finite sampleRate and 1-100000 finite samples.');
+    const { sampleRate, samples, xSamples, ySamples } = message ?? {};
+    const validRate = Number.isFinite(sampleRate) && sampleRate > 0;
+    const isSingleChannel = Array.isArray(samples) && xSamples === undefined && ySamples === undefined;
+    const isPairedChannel = samples === undefined && Array.isArray(xSamples) && Array.isArray(ySamples);
+    const validSingleChannel = isSingleChannel &&
+        samples.length > 0 &&
+        samples.length <= MAX_SAMPLES_PER_MESSAGE &&
+        samples.every(Number.isFinite);
+    const validPairedChannel = isPairedChannel &&
+        xSamples.length > 0 &&
+        xSamples.length === ySamples.length &&
+        xSamples.length <= MAX_SAMPLES_PER_MESSAGE &&
+        xSamples.every(Number.isFinite) &&
+        ySamples.every(Number.isFinite);
+
+    if (!validRate || (!validSingleChannel && !validPairedChannel)) {
+        console.error('TCP message must contain a positive sampleRate and either 1-100000 finite samples or equally sized finite xSamples and ySamples arrays.');
         socket.destroy();
         return false;
     }
 
-    broadcast(sampleRate, samples);
+    broadcast(validSingleChannel
+        ? { sampleRate, samples }
+        : { sampleRate, xSamples, ySamples });
     return true;
 }
 
