@@ -31,8 +31,6 @@ export default function OscilloscopeCanvas({
             canvas.width = Math.max(1, Math.floor(rect.width * pixelRatio));
             canvas.height = Math.max(1, Math.floor(rect.height * pixelRatio));
             ctx.setTransform(pixelRatio, 0, 0, pixelRatio, 0, 0);
-            canvas.style.width = `${rect.width}px`;
-            canvas.style.height = `${rect.height}px`;
         };
 
         const render = (time) => {
@@ -55,11 +53,14 @@ export default function OscilloscopeCanvas({
         };
 
         window.addEventListener('resize', resizeCanvas);
+        const resizeObserver = new ResizeObserver(resizeCanvas);
+        resizeObserver.observe(canvas.parentElement);
         resizeCanvas();
         animationFrameId = window.requestAnimationFrame(render);
 
         return () => {
             window.removeEventListener('resize', resizeCanvas);
+            resizeObserver.disconnect();
             window.cancelAnimationFrame(animationFrameId);
         };
     }, [dataBuffer, xyDataBuffer]);

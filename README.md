@@ -64,6 +64,49 @@ clear client
 
 The TCP bridge reassembles newline-delimited messages because TCP does not preserve write boundaries; each complete line must contain the sample rate and its samples.
 
-*5. AI Monitoring*
-* *Tools:* Python (FastAPI).
-* *Data Flow & Form:*  the Python agent will simply connect directly to the Node.js WebSocket server as another standard client to receive the live data arrays.
+## Run the dummy-data tests
+
+The scripts in `tests/` generate their own local sample data. They do not need MATLAB/Simulink, the Ethernet server, the AI service, or an API key, and they do not send data over the network.
+
+To run all three checks from the repository root:
+
+```sh
+cd frontend
+npm run test:dummy
+```
+
+To run one check from the repository root:
+
+```sh
+node tests/test-signal-processing.mjs
+node tests/test-spectrum.mjs
+node tests/test-scope-frames.mjs
+```
+
+The signal-processing check covers sample-message parsing, measurements, paired-channel downsampling, and trigger detection. The spectrum check uses a generated 50 Hz sine wave with a 10% third harmonic. The scope-frame check covers single and paired inputs in Time, X-Y, and FFT modes, single acquisition, and FFT axis scaling. More detail is in [`tests/README.md`](tests/README.md).
+
+## AI assistant and waveform analysis
+
+The optional Python service connects to the existing Node WebSocket stream as a second client. It keeps a bounded rolling buffer (up to 10 seconds), computes channel measurements and spectrum summaries locally, and sends a selected capture to the configured model only when the user requests analysis or enables automatic monitoring. It does not sit in the browser rendering path.
+
+The oscilloscope UI includes a context field, optional expected frequency and Vrms fields, a **Analyze current capture** action, chat, and an opt-in automatic monitor. Chat and analysis include a compact capture payload with per-channel measurements, prominent spectrum peaks, a waveform preview, and a spectrum preview. Automatic monitoring checks for persistent candidate conditions locally and limits AI calls to one per minute. Candidate flags are prompts for interpretation, not calibrated fault diagnoses.
+
+Start all three processes on the oscilloscope computer. First start `backend/ethernet-server.js` as described above, then start the AI service:
+
+```sh
+cd ai_service
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+cp .env.example .env
+```
+
+Create a Gemini API key in [Google AI Studio](https://aistudio.google.com/apikey), set `GEMINI_API_KEY` in `ai_service/.env`, then run:
+
+```sh
+uvicorn app:app --host 127.0.0.1 --port 8090
+```
+
+Finally start the Vite frontend with `cd frontend && npm run dev`. Vite proxies `/api/ai` to the local Python service. The AI service listens only on localhost and keeps the model key server-side. Without an API key the scope and stream still work; AI controls stay unavailable. Automatic monitoring starts disabled. When you ask for chat/analysis or enable automatic monitoring, capture samples and the entered measurement context are sent to the configured model provider. Review the provider's current data-retention settings before sending sensitive measurements.
+
+The default model is `gemini-3.5-flash-lite`. Set `NODE_WS_URL` or `GEMINI_MODEL` in `.env` to override the defaults. The service currently binds to `127.0.0.1:8090`.

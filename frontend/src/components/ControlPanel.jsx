@@ -1,3 +1,5 @@
+import AiAssistantPanel from './AiAssistantPanel';
+
 export default function ControlPanel({ settings, hasPairedInput, updateSetting, actions }) {
     return (
         <aside className="dso-controls">
@@ -157,6 +159,8 @@ export default function ControlPanel({ settings, hasPairedInput, updateSetting, 
                     <span>{settings.trigLevel.toFixed(1)} V</span>
                 </div>
             </section>
+
+            <AiAssistantPanel />
         </aside>
     );
 }
