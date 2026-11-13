@@ -7,6 +7,7 @@
     "dev": "vite",
     "build": "vite build",
     "lint": "eslint .",
+    "test:dummy": "node ../tests/test-signal-processing.mjs && node ../tests/test-spectrum.mjs && node ../tests/test-scope-frames.mjs",
     "preview": "vite preview"
   },
   "dependencies": {

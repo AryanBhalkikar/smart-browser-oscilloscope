@@ -6,9 +6,12 @@ export class DataBuffer {
         this.head = 0;
         this.tail = 0;
         this.totalSamplesReceived = 0;
+        this.version = 0;
+        this.generation = 0;
     }
 
     push(samples) {
+        if (samples.length === 0) return;
         for (let i = 0; i < samples.length; i++) {
             this.buffer[this.head] = samples[i];
             this.head = (this.head + 1) % BUFFER_SIZE;
@@ -19,12 +22,15 @@ export class DataBuffer {
                 this.tail = (this.tail + 1) % BUFFER_SIZE;
             }
         }
+        this.version++;
     }
 
     clear() {
         this.head = 0;
         this.tail = 0;
         this.totalSamplesReceived = 0;
+        this.version++;
+        this.generation++;
     }
 
     extractWindow(startIdx, requiredSamples) {

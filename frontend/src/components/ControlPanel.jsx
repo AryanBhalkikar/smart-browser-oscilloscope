@@ -1,5 +1,3 @@
-import React from 'react';
-
 export default function ControlPanel({ settings, hasPairedInput, updateSetting, actions }) {
     return (
         <aside className="dso-controls">
@@ -27,8 +25,58 @@ export default function ControlPanel({ settings, hasPairedInput, updateSetting, 
                         title={hasPairedInput ? 'Show the X-Y pattern' : 'Connect a paired X/Y input to enable X-Y mode'}
                         onClick={() => updateSetting('displayMode', 'XY')}
                     >X-Y</button>
+                    <button
+                        className={settings.displayMode === 'FFT' ? 'active' : ''}
+                        onClick={() => updateSetting('displayMode', 'FFT')}
+                    >FFT</button>
                 </div>
+                <button
+                    className={`measurements-toggle ${settings.showMeasurements ? 'active' : ''}`}
+                    aria-pressed={settings.showMeasurements}
+                    onClick={() => updateSetting('showMeasurements', !settings.showMeasurements)}
+                >Measurements: {settings.showMeasurements ? 'On' : 'Off'}</button>
             </section>
+
+            {settings.displayMode === 'FFT' && <section className="control-group">
+                <h3>FFT Spectrum</h3>
+                <div className="control-row">
+                    <label>Window size</label>
+                    <select value={settings.fftSize} onChange={(e) => updateSetting('fftSize', parseInt(e.target.value, 10))}>
+                        <option value="1024">1024 samples</option>
+                        <option value="2048">2048 samples</option>
+                        <option value="4096">4096 samples</option>
+                        <option value="8192">8192 samples</option>
+                        <option value="16384">16384 samples</option>
+                    </select>
+                </div>
+                <div className="control-row">
+                    <label>Max frequency</label>
+                    <select
+                        value={settings.fftMaxFrequency ?? 'nyquist'}
+                        onChange={(e) => updateSetting('fftMaxFrequency', e.target.value === 'nyquist' ? null : parseInt(e.target.value, 10))}
+                    >
+                        <option value="500">500 Hz</option>
+                        <option value="1000">1 kHz</option>
+                        <option value="2000">2 kHz</option>
+                        <option value="5000">5 kHz</option>
+                        <option value="10000">10 kHz</option>
+                        <option value="nyquist">Nyquist</option>
+                    </select>
+                </div>
+                <div className="control-row">
+                    <label>Vertical range</label>
+                    <select value={settings.fftDbRange} onChange={(e) => updateSetting('fftDbRange', parseInt(e.target.value, 10))}>
+                        <option value="40">40 dB</option>
+                        <option value="80">80 dB</option>
+                        <option value="120">120 dB</option>
+                    </select>
+                </div>
+                <div className="spectrum-resolution">
+                    Span: {formatFrequency(Math.min(settings.fftMaxFrequency ?? settings.sampleRate / 2, settings.sampleRate / 2))}
+                    {' · '}
+                    Resolution: {(settings.sampleRate / settings.fftSize).toFixed(2)} Hz/bin
+                </div>
+            </section>}
 
             {settings.displayMode === 'TIME' && <section className="control-group">
                 <h3>Vertical</h3>
@@ -111,4 +159,8 @@ export default function ControlPanel({ settings, hasPairedInput, updateSetting, 
             </section>
         </aside>
     );
+}
+
+function formatFrequency(hz) {
+    return hz >= 1000 ? `${(hz / 1000).toFixed(hz % 1000 === 0 ? 0 : 1)} kHz` : `${hz.toFixed(0)} Hz`;
 }
