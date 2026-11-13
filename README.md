@@ -1,25 +1,31 @@
 # Browser-Based Smart Oscilloscope
 
 ## Project Description
-The system will function as a web-based DSO. By using instrument transformers and microcontroller ADCs, it will capture continuous AC waveforms, current and scaled voltages. The final product (on web browser) will have features like real-time digital signal processing, waveform spectrum analysis via FFT, X-Y mode for generating Lissajous figures to calculate phase angle errors, etc. An AI agent will be integrated to autonomously monitor the live telemetry to flag anomalies or calibration drift. This project can provide a low-cost and scalable architecture for remote equipment monitoring and automated fault diagnostics.
+
+This project displays sampled voltage waveforms in a browser oscilloscope. It can show one or two channels in Time mode, plot paired channels in X-Y mode, calculate an FFT spectrum, and report basic measurements. An optional Python AI service can explain a capture using the waveform data and the user's measurement context.
+
+The repository handles sample transport, processing and display. It does not include physical probes, sensors or ADC hardware; Simulink data or an external measurement device must provide the voltage samples.
 
 ## Architecture
 
-*1. Signal Generation & Edge Transmission*
-* *Tools:* MATLAB Simulink, Quantizer, Byte Pack, and the Instrument Control Toolbox (specifically the UDP Send block).
-* *Data Flow & Form:* The Simulink model generates a sine wave (representing AC mains) and simulates an ADC by sampling the signal at a fixed frequency. It packs the sampled voltage values into a raw binary payload to minimize network bandwidth. This binary payload is then streamed via UDP to `127.0.0.1` (localhost) on port `4000`.
+The normal Ethernet workflow moves waveform samples through these parts:
 
-*2. Backend Ingestion & Processing*
-* *Tools:* Node.js and its native `dgram` module.
-* *Data Flow & Form:* The Node.js UDP socket receives the incoming binary packets as a `Buffer`. The backend unpacks these binary values (e.g., using `buffer.readFloatLE()`) and groups the discrete voltage readings into arrays of 50-100 samples.
+1. **Signal and sampling — MATLAB/Simulink.** Simulink generates or measures voltage signals. For a physical Simscape electrical circuit, a Voltage Sensor measures across two nodes and a PS-Simulink Converter turns its physical signal into a Simulink signal. The model samples the channel or synchronized channel pair and `simulation/TcpJsonStreamer.m` sends batches as newline-delimited JSON over TCP to the oscilloscope computer on port `4000`.
+2. **Network bridge — Node.js.** `backend/ethernet-server.js` accepts TCP connections, checks the JSON message and sample arrays, then broadcasts valid data to browser clients over WebSocket on port `8080`. TCP carries data between the computers; WebSocket carries it from the local bridge to the browser. This bridge does not calculate circuit measurements.
+3. **Stream handling — React frontend.** `frontend/src/hooks/useOscilloscopeStream.js` connects to the WebSocket, validates/normalizes incoming samples through `frontend/src/utils/SampleMessage.js`, and stores samples in rolling channel buffers. The message includes the sample rate, which the frontend uses to place samples on the time axis and calculate frequency-related values.
+4. **Processing and display — frontend utilities and renderers.** Focused modules under `frontend/src/utils/` handle waveform measurements, trigger detection, paired-channel data and FFT calculations. Modules under `frontend/src/renderers/` draw the grid, Time traces, X-Y pattern and spectrum on the oscilloscope canvas. React components provide controls, measurements and status around that canvas. Demo mode generates local sample data so the display can be explored without the Ethernet sender.
+5. **Optional AI analysis — Python/FastAPI and Gemini.** `ai_service/app.py` connects as another client to the Node WebSocket stream, keeps a bounded recent-data buffer, and calculates a compact capture summary. When the user requests analysis or enables monitoring, it sends that summary, selected waveform data and the user's context to the configured Gemini model. This service is separate from the display and measurement path; the oscilloscope continues to work without it.
 
-*3. Real-Time Broadcasting (Direct Connection)*
-* *Tools:* Node.js with WebSockets (`Socket.io` or `ws`).
-* *Data Flow & Form:* the Node.js server directly broadcasts these grouped arrays of voltage data to all connected WebSocket clients.
+The bridge also has a separate older UDP entry point in `backend/server.js`; the direct Ethernet instructions below use the TCP JSON bridge, `backend/ethernet-server.js`.
 
-*4. Frontend Ingestion & Rendering*
-* *Tools:* React.js (set up with Vite) and the HTML5 `<canvas>` API.
-* *Data Flow & Form:* The React frontend connects to the WebSocket bridge and sequentially appends the incoming voltage arrays into a high-performance `Float32Array`. A `requestAnimationFrame` loop plots the time-domain waveform on the canvas. The time axis is naturally reconstructed by multiplying the sample's array index by the known fixed sampling interval.
+## Measurement and instrumentation concepts
+
+- **Instrumentation** means the equipment and steps used to turn a real electrical signal into data that can be viewed: a sensor or probe, any needed signal scaling, an ADC or simulator sampling step, and the software that displays the samples.
+- **A sensor measures; it does not automatically make a signal safe or correctly scaled.** In Simscape, a Voltage Sensor measures the difference between two circuit nodes. The PS-Simulink Converter makes that measured value available to normal Simulink blocks. A real circuit needs a correctly rated, isolated sensor/probe and suitable hardware; this software does not provide electrical isolation or protection.
+- **Sampling** means taking repeated readings over time. The sample rate (samples per second, or S/s) and the actual time interval between readings determine how accurately the waveform and its frequency can be represented. The sender must report the rate that matches its samples.
+- **Calibration and scaling** connect displayed numbers to real volts. If a sensor, divider, probe or ADC changes the signal size, its scale factor must be applied correctly. A wrong scale produces wrong voltage readings even if the plotted shape looks right.
+- **Measurements are calculated from samples.** Peak-to-peak voltage (Vpp) is the difference between the highest and lowest values; RMS estimates the effective AC voltage; frequency estimates how often the waveform repeats. They depend on valid samples, a correct sample rate and any required calibration factor.
+- **FFT and X-Y are different views of the same samples.** FFT shows the signal's frequency components (including harmonics). X-Y plots one channel against the other; with two periodic signals it can reveal their phase relationship. Neither view replaces checking sensor scaling or calibration.
 
 ## Direct Ethernet TCP Input
 
